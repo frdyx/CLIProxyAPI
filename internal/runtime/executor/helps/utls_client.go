@@ -391,10 +391,13 @@ func (f *fallbackRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	return f.fallback.RoundTrip(req)
 }
 
-// NewUtlsHTTPClient creates an HTTP client using provider-specific TLS
-// fingerprints for protected hosts. It uses Claude Code's Node/OpenSSL profile
-// for Anthropic and a Chrome profile for ChatGPT, with a standard-transport
-// fallback for other hosts.
+// NewUtlsHTTPClient creates the HTTP client used by the Claude and Codex
+// executors.
+//
+// ECO patch: every upstream, Anthropic and ChatGPT hosts included, uses the
+// standard transport (or the configured proxy transport), so the gateway
+// connects as itself. Upstream routes those hosts through round trippers that
+// copy Claude Code's and Chrome's TLS handshakes. See ECO-PATCH.md.
 func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
 	proxyURL := effectiveProxyURL(ctx, cfg, auth)
 
@@ -403,23 +406,19 @@ func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyau
 		ctxRoundTripper, _ = ctx.Value("cliproxy.roundtripper").(http.RoundTripper)
 	}
 
-	var chromeRT http.RoundTripper = newUtlsRoundTripper(proxyURL)
-	var anthropicRT http.RoundTripper = cachedClaudeCodeRoundTripper(proxyURL)
 	var standardTransport http.RoundTripper = http.DefaultTransport
 	if proxyURL != "" {
 		if transport := buildProxyTransport(proxyURL); transport != nil {
 			standardTransport = transport
 		}
 	} else if ctxRoundTripper != nil {
-		chromeRT = ctxRoundTripper
-		anthropicRT = ctxRoundTripper
 		standardTransport = ctxRoundTripper
 	}
 
 	client := &http.Client{
 		Transport: &fallbackRoundTripper{
-			anthropic: anthropicRT,
-			chrome:    chromeRT,
+			anthropic: standardTransport,
+			chrome:    standardTransport,
 			fallback:  standardTransport,
 		},
 	}

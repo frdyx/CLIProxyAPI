@@ -1089,8 +1089,9 @@ func TestApplyCodexWebsocketHeadersDefaultsToCurrentResponsesBeta(t *testing.T) 
 	if got := headers.Get("OpenAI-Beta"); got != codexResponsesWebsocketBetaHeaderValue {
 		t.Fatalf("OpenAI-Beta = %s, want %s", got, codexResponsesWebsocketBetaHeaderValue)
 	}
-	if got := headers.Get("User-Agent"); got != codexUserAgent {
-		t.Fatalf("User-Agent = %s, want %s", got, codexUserAgent)
+	// ECO patch: without a client User-Agent the gateway names itself, not Codex.
+	if got := headers.Get("User-Agent"); got != codexFallbackUserAgent() {
+		t.Fatalf("User-Agent = %s, want %s", got, codexFallbackUserAgent())
 	}
 	if !strings.HasPrefix(codexUserAgent, codexOriginator+"/") {
 		t.Fatalf("default Codex User-Agent = %s, want prefix %s/", codexUserAgent, codexOriginator)
@@ -1101,8 +1102,9 @@ func TestApplyCodexWebsocketHeadersDefaultsToCurrentResponsesBeta(t *testing.T) 
 	if !strings.Contains(codexUserAgent, "(codex-tui;") {
 		t.Fatalf("default Codex User-Agent = %s, want codex-tui suffix", codexUserAgent)
 	}
-	if got := headers.Get("Originator"); got != codexOriginator {
-		t.Fatalf("Originator = %s, want %s", got, codexOriginator)
+	// ECO patch: no Originator is invented when the client sends none.
+	if got := headers.Get("Originator"); got != "" {
+		t.Fatalf("Originator = %s, want empty", got)
 	}
 	if got := headers.Get("Version"); got != "" {
 		t.Fatalf("Version = %q, want empty", got)
@@ -1163,11 +1165,12 @@ func TestApplyCodexWebsocketHeadersDefaultsToCodexCloaking(t *testing.T) {
 
 			headers = applyCodexWebsocketHeaders(ctx, headers, tt.auth, tt.token, cfg, false)
 
-			if got := headers.Get("User-Agent"); got != codexUserAgent {
-				t.Fatalf("User-Agent = %q, want %q", got, codexUserAgent)
+			// ECO patch: cloaking never applies, so the credential's configured headers stay.
+			if got := headers.Get("User-Agent"); got != "custom-ua" {
+				t.Fatalf("User-Agent = %q, want %q", got, "custom-ua")
 			}
-			if got := headers.Get("Originator"); got != codexOriginator {
-				t.Fatalf("Originator = %q, want %q", got, codexOriginator)
+			if got := headers.Get("Originator"); got != "custom-origin" {
+				t.Fatalf("Originator = %q, want %q", got, "custom-origin")
 			}
 		})
 	}
@@ -1721,11 +1724,12 @@ func TestApplyCodexHeadersDefaultsToCodexCloaking(t *testing.T) {
 
 	applyCodexHeadersFromSources(req, auth, "api-key", false, cfg, ginHeaders)
 
-	if got := req.Header.Get("User-Agent"); got != codexUserAgent {
-		t.Fatalf("User-Agent = %q, want %q", got, codexUserAgent)
+	// ECO patch: cloaking never applies, so the credential's configured headers stay.
+	if got := req.Header.Get("User-Agent"); got != "custom-ua" {
+		t.Fatalf("User-Agent = %q, want %q", got, "custom-ua")
 	}
-	if got := req.Header.Get("Originator"); got != codexOriginator {
-		t.Fatalf("Originator = %q, want %q", got, codexOriginator)
+	if got := req.Header.Get("Originator"); got != "custom-origin" {
+		t.Fatalf("Originator = %q, want %q", got, "custom-origin")
 	}
 }
 
@@ -1807,7 +1811,9 @@ func TestApplyCodexWebsocketHeaders_EmptyAPIKey_OmitsAuthorizationAndOAuthHeader
 }
 
 func TestApplyModelHeaderOverridesFromModelConfig(t *testing.T) {
-	const wantUA = "codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)"
+	// ECO patch: the catalog's Codex User-Agent override for gpt-5.6-luna is not
+	// applied, so the configured default stays.
+	const wantUA = "config-ua"
 	req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
@@ -1828,8 +1834,8 @@ func TestApplyModelHeaderOverridesFromModelConfig(t *testing.T) {
 	if got := req.Header.Get("User-Agent"); got != wantUA {
 		t.Fatalf("User-Agent = %q, want %q", got, wantUA)
 	}
-	if got := codexSessionHeaderValue(req.Header); got == "" {
-		t.Fatal("expected Session_id to be set for Mac OS User-Agent override")
+	if got := req.Header.Get("Originator"); got == codexOriginator {
+		t.Fatalf("Originator = %q, want no catalog override", got)
 	}
 
 	applyModelHeaderOverrides(req.Header, "gpt-5.4")
@@ -1860,11 +1866,12 @@ func TestApplyModelHeaderOverridesMultipleHeaders(t *testing.T) {
 
 	applyModelHeaderOverrides(headers, "test-override-headers-model")
 
-	if got := headers.Get("User-Agent"); got != "custom-ua/1.0" {
-		t.Fatalf("User-Agent = %q, want custom-ua/1.0", got)
+	// ECO patch: catalog overrides never set identity headers; others still apply.
+	if got := headers.Get("User-Agent"); got != "old-ua" {
+		t.Fatalf("User-Agent = %q, want old-ua", got)
 	}
-	if got := headers.Get("Originator"); got != "custom-origin" {
-		t.Fatalf("Originator = %q, want custom-origin", got)
+	if got := headers.Get("Originator"); got != "old-origin" {
+		t.Fatalf("Originator = %q, want old-origin", got)
 	}
 	if got := headers.Get("X-Test-Header"); got != "forced-value" {
 		t.Fatalf("X-Test-Header = %q, want forced-value", got)

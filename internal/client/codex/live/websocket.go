@@ -258,9 +258,7 @@ func (h *Handler) directRealtimeURL(model string) string {
 func directRealtimeHeaders(source http.Header) http.Header {
 	headers := protocolHeaders(source)
 	headers.Del("OpenAI-Alpha")
-	if headers.Get("Originator") == "" {
-		headers.Set("Originator", "Codex Desktop")
-	}
+	// ECO patch: forward the client's own Originator; never invent one. See ECO-PATCH.md.
 	return headers
 }
 

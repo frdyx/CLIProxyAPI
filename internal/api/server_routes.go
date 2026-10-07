@@ -423,8 +423,8 @@ func (s *Server) codexAlphaSearch(c *gin.Context) {
 	baseHeaders := make(http.Header)
 	baseHeaders.Set("Content-Type", "application/json")
 	baseHeaders.Set("Accept", "application/json")
-	baseHeaders.Set("Originator", "codex_cli_rs")
-	for _, name := range []string{"Version", "User-Agent", "Session_id", "X-Client-Request-Id"} {
+	// ECO patch: forward the client's own Originator; never invent one. See ECO-PATCH.md.
+	for _, name := range []string{"Version", "User-Agent", "Originator", "Session_id", "X-Client-Request-Id"} {
 		if value := strings.TrimSpace(c.GetHeader(name)); value != "" {
 			baseHeaders.Set(name, value)
 		}

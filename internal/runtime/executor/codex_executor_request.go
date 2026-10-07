@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
@@ -31,6 +32,22 @@ const (
 )
 
 var dataTag = []byte("data:")
+
+// codexFallbackUserAgent names this gateway when a client sends no User-Agent.
+// ECO patch: upstream sends Codex's own User-Agent instead. See ECO-PATCH.md.
+func codexFallbackUserAgent() string {
+	return "CLIProxyAPI/" + buildinfo.Version
+}
+
+// isClientIdentityHeader reports whether name identifies the calling client.
+// ECO patch: model catalog overrides never set these headers. See ECO-PATCH.md.
+func isClientIdentityHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "user-agent", "originator":
+		return true
+	}
+	return false
+}
 
 func translateCodexRequestPair(from, to sdktranslator.Format, model string, originalPayload, payload []byte, stream bool, preserveEmptyThinkingBlocks ...bool) ([]byte, []byte) {
 	original, body, _ := translateCodexRequestPairWithUpdateIntent(from, to, model, originalPayload, payload, stream, preserveEmptyThinkingBlocks...)
@@ -166,6 +183,9 @@ func applyModelHeaderOverrides(headers http.Header, modelName string) {
 		return
 	}
 	for key, value := range overrides {
+		if isClientIdentityHeader(key) {
+			continue
+		}
 		headers.Set(key, value)
 	}
 	if strings.Contains(headers.Get("User-Agent"), "Mac OS") && codexSessionHeaderValue(headers) == "" {
@@ -208,7 +228,7 @@ func applyCodexHeadersFromSources(r *http.Request, auth *cliproxyauth.Auth, toke
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Openai-Internal-Codex-Responses-Lite", "")
 
 	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
+	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexFallbackUserAgent())
 
 	if stream {
 		r.Header.Set("Accept", "text/event-stream")
@@ -218,10 +238,9 @@ func applyCodexHeadersFromSources(r *http.Request, auth *cliproxyauth.Auth, toke
 	r.Header.Set("Connection", "Keep-Alive")
 
 	isAPIKey := codexAuthUsesAPIKey(auth)
+	// ECO patch: forward the client's own Originator; never invent one.
 	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
 		r.Header.Set("Originator", originator)
-	} else if !isAPIKey {
-		r.Header.Set("Originator", codexOriginator)
 	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {
@@ -310,13 +329,11 @@ func isCodexCloakingDisabled(cfg *config.Config, auth *cliproxyauth.Auth) bool {
 	return false
 }
 
-func applyCodexCloakingHeaders(headers http.Header, cfg *config.Config, auth *cliproxyauth.Auth) {
-	if headers == nil || cfg == nil || isCodexCloakingDisabled(cfg, auth) {
-		return
-	}
-	headers.Set("User-Agent", codexUserAgent)
-	headers.Set("Originator", codexOriginator)
-}
+// applyCodexCloakingHeaders does nothing in this fork.
+// ECO patch: upstream replaces User-Agent and Originator with Codex's own unless
+// cloaking is disabled. This gateway never presents another client's identity,
+// whatever the configuration. See ECO-PATCH.md.
+func applyCodexCloakingHeaders(headers http.Header, cfg *config.Config, auth *cliproxyauth.Auth) {}
 
 func normalizeCodexInstructions(body []byte, nativeRequest ...bool) []byte {
 	if len(nativeRequest) > 0 && nativeRequest[0] {
